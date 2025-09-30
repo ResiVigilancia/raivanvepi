@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Profilaxia da Raiva Humana – NVEPI</title>
+<style>
+  :root{
+    --verde-musgo:#1a3d1a; 
+    --verde-claro:#a5d6a7; 
+    --branco:#ffffff;
+    --cinza:#f5f5f5; 
+    --borda:#cfd8dc;
+    --ok:#2e7d32; 
+    --warn:#c62828;
+  }
+  *{box-sizing:border-box;font-family:Inter,Segoe UI,system-ui,sans-serif}
+  body{margin:0;background:var(--branco);}
+  header{background:var(--verde-musgo);color:var(--branco);padding:20px;text-align:center;border-bottom:6px solid var(--verde-claro)}
+  header h1{margin:10px 0 0;font-size:22px}
+  header img{max-height:90px;display:block;margin:0 auto 8px}
+  .app{max-width:1000px;margin:24px auto;padding:0 16px}
+  .card{background:var(--branco);border:1px solid var(--borda);border-radius:16px;
+        box-shadow:0 6px 18px rgba(0,0,0,.08);padding:18px;margin-bottom:16px}
+  .step-title{font-weight:700;color:var(--verde-musgo);margin:0 0 10px}
+  .grid{display:grid;gap:10px}
+  @media(min-width:780px){.grid{grid-template-columns:repeat(3,1fr)}}
+  .btn{border:2px solid var(--verde-musgo);color:var(--verde-musgo);background:var(--branco);
+       padding:10px;border-radius:12px;cursor:pointer;font-weight:600;text-align:center}
+  .btn:hover{background:var(--verde-claro);color:var(--branco)}
+  .btn.selected{background:var(--verde-musgo);color:var(--branco)}
+  .pill{display:inline-block;background:var(--verde-claro);border-radius:999px;
+        padding:5px 10px;font-size:12px;margin:4px;color:#0d2a0d}
+  .result{border-left:6px solid var(--verde-musgo);padding-left:12px}
+  .good{border-left-color:var(--ok)}
+  .warn{border-left-color:var(--warn)}
+  .muted{color:#555;font-size:13px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  input,select{border:1px solid var(--borda);border-radius:10px;padding:10px;background:#fff}
+  .footer{font-size:12px;color:#333;opacity:.9;text-align:center;margin:18px 0}
+  .tag{font-size:12px;background:var(--verde-claro);color:#0d2a0d;
+       border:1px solid #81c784;padding:4px 8px;border-radius:999px;margin:4px}
+  .sticky{position:sticky;top:10px}
+  .two{display:grid;gap:16px}
+  @media(min-width:980px){.two{grid-template-columns:2fr 1fr}}
+  .titlebar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .reset{background:transparent;border:0;color:var(--verde-musgo);
+         text-decoration:underline;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <img src="logo.png" alt="Logo NVEPI">
+  <h1>Profilaxia da Raiva Humana – Assistente Interativo</h1>
+  <p>Baseado nas diretrizes nacionais – NVEPI DIRAPS NORTE-DF</p>
+</header>
+
+<div class="app two">
+  <div>
+    <div class="card">
+      <div class="titlebar">
+        <h3 class="step-title">1) Tipo de contato</h3>
+        <button class="reset" onclick="resetAll()">recomeçar</button>
+      </div>
+      <div class="grid" id="stepContato">
+        <button class="btn" data-v="direto">Mordedura/arranhadura/lamedura em pele lesada/mucosa</button>
+        <button class="btn" data-v="indireto">Contato indireto (pele íntegra, toque, alimento contaminado)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="step-title">2) Animal envolvido</h3>
+      <div class="grid" id="stepAnimal">
+        <button class="btn" data-v="cao_gato">Cão ou gato</button>
+        <button class="btn" data-v="morcego">Morcego</button>
+        <button class="btn" data-v="silvestre">Mamífero silvestre</button>
+        <button class="btn" data-v="outros">Outros animais exceto morcego</button>
+      </div>
+    </div>
+
+    <div class="card" id="boxStatus" style="display:none">
+      <h3 class="step-title">3) Situação do animal</h3>
+      <div class="grid" id="stepStatus">
+        <button class="btn" data-v="saudavel_observavel">Saudável e observável (10 dias)</button>
+        <button class="btn" data-v="desapareceu_adoeceu_morreu">Desapareceu / adoeceu / morreu</button>
+        <button class="btn" data-v="suspeito_raivoso">Suspeito de raiva ou raivoso</button>
+      </div>
+      <p class="muted">Observar diariamente por 10 dias. Se permanecer saudável, suspender/não iniciar vacina.</p>
+    </div>
+
+    <div class="card" id="boxGravidade" style="display:none">
+      <h3 class="step-title">4) Gravidade do ferimento</h3>
+      <div class="grid" id="stepGravidade">
+        <button class="btn" data-v="leve">Leve (escoriações superficiais, fora de cabeça/pescoço/mãos/mucosas)</button>
+        <button class="btn" data-v="grave">Grave (múltiplas/profundas, em áreas críticas, mucosas ou imunossuprimidos)</button>
+      </div>
+    </div>
+
+    <div class="card result" id="resultado" style="display:none">
+      <h3 class="step-title">Conduta</h3>
+      <div id="texto"></div>
+      <div id="tags" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <div class="sticky">
+    <div class="card">
+      <h3 class="step-title">Cálculo de Soro (opcional)</h3>
+      <p class="muted">Indicado para exposições graves e em morcego/silvestres.</p>
+      <div class="row">
+        <label>Peso (kg)<br><input id="peso" type="number" min="1" step="0.1" placeholder="Ex: 68"></label>
+        <label>Produto<br>
+          <select id="tipoSoro">
+            <option value="HRIG">SAR Humano (20 UI/kg)</option>
+            <option value="ERIG">SAR Equino (40 UI/kg)</option>
+          </select>
+        </label>
+        <label>Concentração (UI/mL)<br><input id="conc" type="number" min="50" step="10" value="150"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" onclick="calcular()">Calcular dose</button>
+      </div>
+      <div id="doseBox" class="result" style="display:none;margin-top:12px">
+        <div id="doseTxt"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="step-title">Lembretes rápidos</h3>
+      <div>
+        <span class="tag">Lavar ferida com água e sabão</span>
+        <span class="tag">Vacina IM dias 0, 3, 7, 14 (+28 se imunoss.)</span>
+        <span class="tag">Soro: infiltrar na ferida, restante IM</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="footer">Material educativo – NVEPI DIRAPS NORTE-DF | Não substitui protocolos oficiais.</p>
+
+<script>
+  const state = { contato:null, animal:null, status:null, gravidade:null };
+
+  function selectIn(containerId, value){
+    const box = document.getElementById(containerId);
+    box.querySelectorAll('.btn').forEach(b=>{
+      b.classList.toggle('selected', b.dataset.v===value);
+    });
+  }
+  function resetAll(){
+    Object.keys(state).forEach(k=>state[k]=null);
+    document.querySelectorAll('.btn').forEach(b=>b.classList.remove('selected'));
+    document.getElementById('boxStatus').style.display='none';
+    document.getElementById('boxGravidade').style.display='none';
+    document.getElementById('resultado').style.display='none';
+  }
+  document.getElementById('stepContato').addEventListener('click', e=>{
+    if(!e.target.classList.contains('btn')) return;
+    state.contato = e.target.dataset.v;
+    selectIn('stepContato', state.contato); compute();
+  });
+  document.getElementById('stepAnimal').addEventListener('click', e=>{
+    if(!e.target.classList.contains('btn')) return;
+    state.animal = e.target.dataset.v;
+    selectIn('stepAnimal', state.animal);
+    document.getElementById('boxStatus').style.display = (state.animal==='cao_gato') ? 'block':'none';
+    compute();
+  });
+  document.getElementById('stepStatus').addEventListener('click', e=>{
+    if(!e.target.classList.contains('btn')) return;
+    state.status = e.target.dataset.v;
+    selectIn('stepStatus', state.status);
+    document.getElementById('boxGravidade').style.display='block'; compute();
+  });
+  document.getElementById('stepGravidade').addEventListener('click', e=>{
+    if(!e.target.classList.contains('btn')) return;
+    state.gravidade = e.target.dataset.v;
+    selectIn('stepGravidade', state.gravidade); compute();
+  });
+
+  function bullets(items){ return `<ul>${items.map(i=>`<li>${i}</li>`).join('')}</ul>` }
+  function compute(){
+    const out = document.getElementById('resultado');
+    const texto = document.getElementById('texto');
+    const tags  = document.getElementById('tags');
+    if(state.contato==='indireto'){
+      out.style.display='block'; out.className='card result good';
+      texto.innerHTML = `<b>Não indicar profilaxia.</b>`+bullets(['Higienizar área se necessário','Orientar sinais e retorno']);
+      tags.innerHTML = `<span class="pill">Contato indireto</span>`; return;
+    }
+    if(!state.contato || !state.animal) return;
+    if(['morcego','silvestre'].includes(state.animal)){
+      out.style.display='block'; out.className='card result';
+      texto.innerHTML = `<b>Vacina + Soro (dia 0).</b>`+bullets([
+        'Lavar ferimento com água e sabão',
+        'Vacina IM dias 0, 3, 7, 14 (+28 se imunoss.)',
+        'Soro: infiltrar ao redor/dentro da ferida, restante IM em local distante'
+      ]);
+      tags.innerHTML = `<span class="pill">Morcego/silvestre</span>`; return;
+    }
+    if(state.animal==='outros'){
+      out.style.display='block'; out.className='card result good';
+      texto.innerHTML = `<b>Não indicar profilaxia em geral.</b>`+bullets(['Avaliar risco se comportamento atípico']);
+      tags.innerHTML = `<span class="pill">Outros animais</span>`; return;
+    }
+    if(state.animal==='cao_gato' && state.status && state.gravidade){
+      out.style.display='block';
+      if(state.status==='saudavel_observavel'){
+        out.className='card result good';
+        texto.innerHTML=`<b>Observar 10 dias.</b>`+bullets([
+          'Se saudável → não iniciar ou suspender vacina',
+          'Se adoecer/morrer/desaparecer → tratar como grave'
+        ]);
+        return;
+      }
+      if(state.gravidade==='leve'){
+        out.className='card result';
+        texto.innerHTML=`<b>Vacina IM dias 0, 3, 7, 14</b>`+bullets(['+28 se imunoss.','Acompanhar evolução']);
+        return;
+      }
+      out.className='card result warn';
+      texto.innerHTML=`<b>Vacina + Soro (dia 0).</b>`+bullets([
+        'Lavar ferimento com água e sabão',
+        'Vacina IM dias 0, 3, 7, 14 (+28 se imunoss.)',
+        'Soro conforme peso e produto'
+      ]);
+    } else { out.style.display='none'; }
+  }
+  function calcular(){
+    const peso=parseFloat(document.getElementById('peso').value);
+    const tipo=document.getElementById('tipoSoro').value;
+    const conc=parseFloat(document.getElementById('conc').value||150);
+    if(!(peso>0)){alert('Informe o peso.');return;}
+    const uiKg=(tipo==='HRIG')?20:40;
+    const doseUI=peso*uiKg; const volume=doseUI/conc;
+    const nome=(tipo==='HRIG')?'SAR Humano':'SAR Equino';
+    const box=document.getElementById('doseBox'); box.style.display='block';
+    document.getElementById('doseTxt').innerHTML=
+      `<b>${nome}</b><br> Dose: <b>${doseUI.toFixed(0)} UI</b> (${uiKg} UI/kg).<br>`+
+      `Com ${conc} UI/mL → <b>${volume.toFixed(2)} mL</b>.`;
+  }
+</script>
+</body>
+</html>

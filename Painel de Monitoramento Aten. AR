@@ -1,0 +1,459 @@
+# ===============================================================
+# Painel SINAN - Atendimentos Antirrábicos (Versão com abas e cores)
+# Elaborado por: M.V. Luiza Sousa - NVEPI DIRAPS Norte-DF
+# ===============================================================
+
+library(shiny)
+library(dplyr)
+library(ggplot2)
+library(rio)
+library(bslib)
+library(DT)
+library(tidyr)
+library(stringr)
+library(lubridate)
+library(data.table)
+library(rsconnect)
+
+# -------------------- LEITURA DA BASE (AUTOMÁTICA) ---------------------------
+library(rio)
+library(dplyr)
+library(data.table)
+
+setwd("Z:/")
+
+# Ano atual
+ano_atual <- as.numeric(format(Sys.Date(), "%Y"))
+
+# Arquivos que queremos buscar:
+arquivos <- c(
+  "ANTRANET.DBF",                       # ano atual
+  paste0("ANTRANET_", ano_atual - 1, ".DBF"),
+  paste0("ANTRANET_", ano_atual - 2, ".DBF")
+)
+
+# Mantém apenas os arquivos que EXISTEM na pasta
+arquivos_existentes <- arquivos[file.exists(arquivos)]
+
+# Leitura e união das bases
+dados <- arquivos_existentes |>
+  lapply(import) |>
+  rbindlist(fill = TRUE)
+
+# Garante coluna de ano (ajuste o nome da data se necessário)
+dados <- dados |>
+  mutate(
+    ANO_NOTIFICACAO = lubridate::year(as.Date(DT_NOTIFIC))
+  )
+
+colnames(dados)
+
+# -------------------- FUNÇÕES AUXILIARES -----------------------
+extrai_idade_anos <- function(x) {
+  x_chr <- as.character(x)
+  x_chr[is.na(x_chr)] <- NA_character_
+  x_chr <- ifelse(!is.na(x_chr) & str_length(x_chr) < 4,
+                  str_pad(x_chr, 4, pad = "0"),
+                  x_chr)
+  is_ano <- !is.na(x_chr) & str_sub(x_chr, 1, 1) == "4"
+  idade <- rep(NA_real_, length(x_chr))
+  idade[is_ano] <- as.numeric(str_sub(x_chr[is_ano], 3, 4))
+  return(idade)
+}
+
+is_pos <- function(x) {
+  x_chr <- as.character(x)
+  return(!is.na(x_chr) & x_chr %in% c("1", "1.0"))
+}
+
+# -------------------- RECODIFICAÇÕES INICIAIS -------------------
+
+dados <- dados %>%
+  # --- Filtro geral: apenas registros do Distrito Federal (SG_UF = 53) ---
+  filter(SG_UF == 53) %>%
+  
+  # --- Padronização e classificação dos bairros ---
+  mutate(
+    NM_BAIRRO = str_to_upper(str_trim(NM_BAIRRO)), # padroniza o texto
+    
+    NOME_BAIRRO = case_when(
+      # --- Arapoangas ---
+      ID_BAIRRO == 216 | ID_DISTRIT == 568 |
+        str_detect(NM_BAIRRO, "ARAPOANGAS|ARAPONGA|ARAPOANGA") ~ "Arapoangas",
+      
+      # --- Planaltina ---
+      ID_BAIRRO %in% c(217,218,219,220,221,222) | ID_DISTRIT == 17 |
+        str_detect(NM_BAIRRO, "JARDIM RORIZ|JD RORIZ|JARDIN RORIZ|JARDIM RORIS|VILA F[ÁA]TIMA|VILA DE F[ÁA]TIMA|SUCUPIRA|VILA MILITAR|BURITIS|SETOR RESIDENCIAL LESTE|HORTA COMUNIT[ÁA]RIA|VILA VICENTINA|TRADICIONAL|SETOR TRADICIONAL|VALE DO AMANHECER|EST[ÂA]NCIA|MESTRE D'ARMAS|C[ÓO]RREGO DO ARROZAL|BICA DO DER") ~ "Planaltina",
+      
+      # --- Sobradinho ---
+      ID_BAIRRO %in% c(266,267,268,269,274) | ID_DISTRIT == 11 |
+        str_detect(NM_BAIRRO, "SOBRADINHO I|SOBRADINHO 1|NOVA COLINA|ALTO DA BOA VISTA|ALFAMA|NOVA DIGN[ÉE]IA|COLORADO|GRANDE COLORADO|VILA DNOCS|LAGO OESTE") ~ "Sobradinho",
+      
+      # --- Sobradinho II ---
+      ID_BAIRRO %in% c(270,271,272,273) | ID_DISTRIT == 34 |
+        str_detect(NM_BAIRRO, "SETOR DE MANS[ÕO]ES|VILA BASEVI") ~ "Sobradinho II",
+      
+      # --- Fercal ---
+      ID_BAIRRO %in% c(275,276,277) | ID_DISTRIT == 435 |
+        str_detect(NM_BAIRRO, "FECAL|C[ÓO]RREGO DO OURO|RUA DO MATO|ENGENHO VELHO") ~ "Fercal",
+      
+      # --- Outros ---
+      TRUE ~ "Outro"
+    ),
+    
+    ANIMAL = case_when(
+      ANIMAL %in% c(1, "1", "1.0") ~ "Canina",
+      ANIMAL %in% c(2, "2", "2.0") ~ "Felina",
+      ANIMAL %in% c(3, "3", "3.0") ~ "Quiróptera",
+      ANIMAL %in% c(4, "4", "4.0") ~ "Primata",
+      ANIMAL %in% c(5, "5", "5.0") ~ "Raposa",
+      ANIMAL %in% c(6, "6", "6.0") ~ "Herbívoro doméstico",
+      ANIMAL %in% c(7, "7", "7.0") ~ "Outra",
+      TRUE ~ "Ignorado"
+    ),
+    
+    CONDIC_ANI = case_when(
+      CONDIC_ANI %in% c(1, "1", "1.0") ~ "Sadio",
+      CONDIC_ANI %in% c(2, "2", "2.0") ~ "Suspeito",
+      CONDIC_ANI %in% c(3, "3", "3.0") ~ "Raivoso",
+      CONDIC_ANI %in% c(4, "4", "4.0") ~ "Morto/Desaparecido",
+      TRUE ~ "Ignorado"
+    ),
+    
+    TRAT_ATUAL = case_when(
+      TRAT_ATUAL %in% c(1, "1", "1.0") ~ "Pré-exposição",
+      TRAT_ATUAL %in% c(2, "2", "2.0") ~ "Dispensa de tratamento",
+      TRAT_ATUAL %in% c(3, "3", "3.0") ~ "Observação do animal",
+      TRAT_ATUAL %in% c(4, "4", "4.0") ~ "Observação + vacina",
+      TRAT_ATUAL %in% c(5, "5", "5.0") ~ "Vacina",
+      TRAT_ATUAL %in% c(6, "6", "6.0") ~ "Soro + vacina",
+      TRAT_ATUAL %in% c(7, "7", "7.0") ~ "Reexposição",
+      TRUE ~ "Ignorado"
+    ),
+    
+    PENDENTE = ifelse(is.na(DT_ENCERRA) | DT_ENCERRA == "", "Pendente", "Encerrada"),
+    IDADE_ANOS = extrai_idade_anos(NU_IDADE_N)
+  ) %>%
+  filter(NOME_BAIRRO != "Outro")  # remove “Outros”
+
+# ------------------------- UI ----------------------------------
+ui <- fluidPage(
+  theme = bs_theme(bootswatch = "flatly", primary = "#2e4e2b", secondary = "#a7c957",
+                   base_font = font_google("Nunito Sans")),
+  
+  tags$head(tags$style(HTML("
+    body { background-color: #f9f9f7; }
+    .titulo-header { background-color: #2e4e2b; color: white; padding: 18px; text-align: center; border-radius:0 0 12px 12px; }
+    .titulo-header img{ height:70px; display:block; margin:0 auto 8px; }
+    .card { background:white; border-radius:12px; padding:12px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+    .footer { position:fixed; bottom:0; left:0; width:100%; background:#2e4e2b; color:white; padding:6px; text-align:center; z-index:1000; }
+  "))),
+  
+  tags$div(class = "titulo-header",
+           tags$img(src = "logo.png", alt = "Logo NVEPI"),
+           h2("Atendimentos Antirrábicos Humanos Pós-Exposição - Região Norte"),
+           h5("Base de dados: SINAN")
+  ),
+  
+  br(),
+  
+  fluidRow(
+    column(3,
+           wellPanel(
+             selectInput(
+               "ano",
+               "Ano da notificação:",
+               choices = c("Todos", sort(unique(dados$ANO_NOTIFICACAO))),
+               selected = "Todos"
+             ),
+             selectInput(
+               "ra",
+               "Região Administrativa:",
+               choices = c("Todas", sort(unique(dados$NOME_BAIRRO))),
+               selected = "Todas"
+             )
+           )
+    ),
+    column(9,
+           tabsetPanel(
+             tabPanel("Resumo",
+                      br(),
+                      fluidRow(
+                        column(6, div(class="card", h4("Total notificações", style="text-align:center; color:#2e4e2b;"), 
+                                      h3(textOutput("total_notificacoes"), style="text-align:center;"))),
+                        column(6, div(class="card", h4("Pendentes", style="text-align:center; color:#806000;"),
+                                      h3(textOutput("notificacoes_pendentes"), style="text-align:center;")))
+                      ),
+                      br(),
+                      fluidRow(
+                        column(6, plotOutput("grafico_tratamento", height = "420px")),
+                        column(6, plotOutput("grafico_condicao_animal", height = "420px"))
+                      )
+             ),
+             
+             tabPanel("Perfil",
+                      br(),
+                      fluidRow(
+                        column(6, plotOutput("grafico_sexo", height = "360px")),
+                        column(6, plotOutput("grafico_faixa_etaria", height = "360px"))
+                      )
+             ),
+             
+             tabPanel("Exposição",
+                      br(),
+                      fluidRow(
+                        column(6, plotOutput("grafico_especie", height = "360px")),
+                        column(6, plotOutput("grafico_condicao_animal", height = "360px"))
+                      ),
+                      br(),
+                      fluidRow(
+                        column(6, plotOutput("grafico_tipo_exposicao", height = "360px")),
+                        column(6, plotOutput("grafico_local_exposicao", height = "360px"))
+                      )
+             ),
+             
+             tabPanel("Pendências",
+                      br(),
+                      div(class = "card",
+                          h4("Notificações em aberto", style = "text-align:center; color:#806000;"),
+                          DTOutput("tabela_pendentes")
+                      )
+             )
+           )
+    )
+  ),
+  
+  tags$footer(class = "footer",
+              "Elaborado por M.V. Luiza Sousa")
+)
+
+# ------------------------ SERVER --------------------------------
+server <- function(input, output, session) {
+  
+  dados_filtrados <- reactive({
+    df <- dados
+    
+    if (!is.null(input$ano) && input$ano != "Todos") {
+      df <- df |> filter(ANO_NOTIFICACAO == as.numeric(input$ano))
+    }
+    
+    if (!is.null(input$ra) && input$ra != "Todas") {
+      df <- df |> filter(NOME_BAIRRO == input$ra)
+    }
+    
+    df
+  })
+  
+  output$total_notificacoes <- renderText({ nrow(dados_filtrados()) })
+  output$notificacoes_pendentes <- renderText({ sum(dados_filtrados()$PENDENTE == "Pendente", na.rm = TRUE) })
+  
+  # === Gráficos ===
+  # ======== GRÁFICO 1 - TRATAMENTO INDICADO ========
+  output$grafico_tratamento <- renderPlot({
+    dados_filtrados() %>%
+      count(TRAT_ATUAL) %>%
+      ggplot(aes(x = reorder(TRAT_ATUAL, n), y = n)) +
+      geom_col(fill = "#a7c957") +
+      geom_text(aes(label = n), hjust = -0.2, size = 4.2, color = "#1a1a1a") +
+      coord_flip() +
+      labs(title = "Tratamento indicado", x = "", y = "Número de notificações") +
+      theme_minimal(base_size = 14, base_family = "Nunito Sans") +
+      theme(
+        plot.title = element_text(face = "bold", color = "#2e4e2b", hjust = 0.5, size = 15),
+        axis.title.y = element_text(color = "#2e4e2b", size = 13, face = "bold"),
+        axis.text = element_text(color = "#2e4e2b", size = 12)
+      )
+  })
+  
+  # ======== GRÁFICO 2 - CONDIÇÃO DO ANIMAL ========
+  output$grafico_condicao_animal <- renderPlot({
+    dados_filtrados() %>%
+      count(CONDIC_ANI) %>%
+      ggplot(aes(x = reorder(CONDIC_ANI, n), y = n)) +
+      geom_col(fill = "#2e4e2b") +
+      geom_text(aes(label = n), hjust = -0.2, size = 4.2, color = "#f9f9f7") +
+      coord_flip() +
+      labs(title = "Condição do animal agressor", x = "", y = "Número de notificações") +
+      theme_minimal(base_size = 14, base_family = "Nunito Sans") +
+      theme(
+        plot.title = element_text(face = "bold", color = "#2e4e2b", hjust = 0.5, size = 15),
+        axis.title.y = element_text(color = "#2e4e2b", size = 13, face = "bold"),
+        axis.text = element_text(color = "#2e4e2b", size = 12)
+      )
+  })
+  
+  # ======== GRÁFICO 3 - ESPÉCIE DO ANIMAL ========
+  output$grafico_especie <- renderPlot({
+    dados_filtrados() %>%
+      count(ANIMAL) %>%
+      ggplot(aes(x = reorder(ANIMAL, n), y = n)) +
+      geom_col(fill = "#88b04b", width = 0.7) +
+      geom_text(aes(label = n), hjust = -0.2, size = 4.2, color = "#1a1a1a") +
+      coord_flip() +
+      labs(title = "Espécie do animal agressor", x = "", y = "Número de notificações") +
+      theme_minimal(base_size = 14, base_family = "Nunito Sans") +
+      theme(
+        plot.title = element_text(face = "bold", color = "#2e4e2b", hjust = 0.5, size = 15),
+        axis.title.y = element_text(color = "#2e4e2b", size = 13, face = "bold"),
+        axis.text = element_text(color = "#2e4e2b", size = 12)
+      )
+  })
+  
+  # ======== GRÁFICO 4 - TIPO DE EXPOSIÇÃO ========
+  output$grafico_tipo_exposicao <- renderPlot({
+    df <- dados_filtrados() %>%
+      transmute(
+        Mordedura = as.integer(is_pos(ANT_MORDED)),
+        Arranhadura = as.integer(is_pos(ANT_ARRANH)),
+        Lambedura = as.integer(is_pos(ANT_LAMBED)),
+        Contato = as.integer(is_pos(ANT_CONTAT)),
+        Outro = as.integer(is_pos(ANT_OUTRO_))
+      ) %>%
+      summarise(across(everything(), ~ sum(.x, na.rm = TRUE))) %>%
+      pivot_longer(everything(), names_to = "Tipo de exposição", values_to = "n")
+    
+    ggplot(df, aes(x = reorder(`Tipo de exposição`, -n), y = n)) +
+      geom_col(fill = "#a7c957", width = 0.7) +
+      geom_text(aes(label = n), vjust = -0.3, size = 4.2, color = "#1a1a1a") +
+      labs(title = "Tipo de exposição", x = "", y = "Número de notificações") +
+      theme_minimal(base_size = 14, base_family = "Nunito Sans") +
+      theme(
+        plot.title = element_text(face = "bold", color = "#2e4e2b", hjust = 0.5, size = 15),
+        axis.title.y = element_text(color = "#2e4e2b", size = 13, face = "bold"),
+        axis.text.x = element_text(angle = 15, vjust = 1, hjust = 1, size = 12, color = "#2e4e2b"),
+        axis.text.y = element_text(size = 12, color = "#2e4e2b")
+      )
+  })
+  
+  # ======== GRÁFICO 5 - LOCAL DE EXPOSIÇÃO ========
+  output$grafico_local_exposicao <- renderPlot({
+    df <- dados_filtrados() %>%
+      transmute(
+        Cabeça = as.integer(is_pos(ANT_CABECA)),
+        Mãos = as.integer(is_pos(ANT_MAOS)),
+        Tronco = as.integer(is_pos(ANT_TRONCO)),
+        Membros_Superiores = as.integer(is_pos(ANT_MEMBRO)),
+        Membros_Inferiores = as.integer(is_pos(ANT_MEMB_1))
+      ) %>%
+      summarise(across(everything(), ~ sum(.x, na.rm = TRUE))) %>%
+      pivot_longer(everything(), names_to = "Local da exposição", values_to = "n")
+    
+    ggplot(df, aes(x = reorder(`Local da exposição`, n), y = n)) +
+      geom_col(fill = "#2e4e2b") +
+      geom_text(aes(label = n), hjust = -0.2, size = 4.2, color = "#f9f9f7") +
+      coord_flip() +
+      labs(title = "Local da exposição", x = "", y = "Número de notificações") +
+      theme_minimal(base_size = 14, base_family = "Nunito Sans") +
+      theme(
+        plot.title = element_text(face = "bold", color = "#2e4e2b", hjust = 0.5, size = 15),
+        axis.title.y = element_text(color = "#2e4e2b", size = 13, face = "bold"),
+        axis.text = element_text(color = "#2e4e2b", size = 12)
+      )
+  })
+  
+  # ======== GRÁFICO 6 - SEXO ========
+  output$grafico_sexo <- renderPlot({
+    dados_filtrados() %>%
+      mutate(CS_SEXO = case_when(
+        CS_SEXO %in% c("M","m") ~ "Masculino",
+        CS_SEXO %in% c("F","f") ~ "Feminino",
+        TRUE ~ "Ignorado"
+      )) %>%
+      count(CS_SEXO) %>%
+      mutate(pct = round(n / sum(n) * 100, 1)) %>%
+      ggplot(aes(x = CS_SEXO, y = n, fill = CS_SEXO)) +
+      geom_col(show.legend = FALSE) +
+      geom_text(aes(label = paste0(n, " (", pct, "%)")), vjust = -0.5, size = 4.2, color = "#1a1a1a") +
+      scale_fill_manual(values = c("Masculino" = "#2e4e2b", "Feminino" = "#a7c957", "Ignorado" = "#c4c4c4")) +
+      labs(title = "Distribuição por sexo", x = "", y = "Número de notificações") +
+      theme_minimal(base_size = 14, base_family = "Nunito Sans") +
+      theme(
+        plot.title = element_text(face = "bold", color = "#2e4e2b", hjust = 0.5, size = 15),
+        axis.title.y = element_text(color = "#2e4e2b", size = 13, face = "bold"),
+        axis.text = element_text(color = "#2e4e2b", size = 12)
+      )
+  })
+  
+  # ======== GRÁFICO 7 - FAIXA ETÁRIA ========
+  output$grafico_faixa_etaria <- renderPlot({
+    df <- dados_filtrados() %>%
+      mutate(ID_ANOS = IDADE_ANOS) %>%
+      filter(!is.na(ID_ANOS)) %>%
+      mutate(faixa = cut(ID_ANOS, breaks = c(-1,9,19,39,59,Inf),
+                         labels = c("0–9","10–19","20–39","40–59","60+"))) %>%
+      count(faixa)
+    
+    ggplot(df, aes(x = faixa, y = n)) +
+      geom_col(fill = "#88b04b") +
+      geom_text(aes(label = n), vjust = -0.3, size = 4.2, color = "#1a1a1a") +
+      labs(title = "Faixa etária (anos)", x = "", y = "Número de notificações") +
+      theme_minimal(base_size = 14, base_family = "Nunito Sans") +
+      theme(
+        plot.title = element_text(face = "bold", color = "#2e4e2b", hjust = 0.5, size = 15),
+        axis.title.y = element_text(color = "#2e4e2b", size = 13, face = "bold"),
+        axis.text = element_text(color = "#2e4e2b", size = 12)
+      )
+  })
+  
+  # === Tabela de Pendências com cores apenas na coluna Classificação ===
+  output$tabela_pendentes <- renderDT({
+    tbl <- dados_filtrados() %>%
+      filter(PENDENTE == "Pendente" & !is.na(DT_NOTIFIC)) %>%
+      mutate(
+        `Dias desde notificação` = as.numeric(Sys.Date() - as_date(DT_NOTIFIC)),
+        Classificação = case_when(
+          `Dias desde notificação` <= 30 ~ "Até 30 dias",
+          `Dias desde notificação` <= 60 ~ "31 a 60 dias",
+          `Dias desde notificação` <= 180 ~ "61 a 180 dias",
+          TRUE ~ "Mais de 180 dias"
+        )
+      ) %>%
+      select(
+        `Número da notificação` = NU_NOTIFIC,
+        `Data da notificação` = DT_NOTIFIC,
+        `Espécie do animal` = ANIMAL,
+        `Condição do animal` = CONDIC_ANI,
+        `Tratamento indicado` = TRAT_ATUAL,
+        `Dias desde notificação`,
+        Classificação
+      )
+    
+    datatable(
+      tbl,
+      extensions = "Buttons",
+      options = list(
+        dom = 'Bfrtip',
+        buttons = c('copy', 'csv', 'excel', 'print'),
+        pageLength = 10,
+        createdRow = JS("
+        function(row, data, index) {
+          // === Colore coluna Classificação ===
+          var cell = $('td', row).eq(6);
+          if (data[6] == 'Até 30 dias') {
+            cell.css({'background-color': '#f1eac8', 'font-weight': 'bold'});
+          } else if (data[6] == '31 a 60 dias') {
+            cell.css({'background-color': '#e9e29c', 'font-weight': 'bold'});
+          } else if (data[6] == '61 a 180 dias') {
+            cell.css({'background-color': '#eeb479', 'font-weight': 'bold'});
+          } else if (data[6] == 'Mais de 180 dias') {
+            cell.css({'background-color': '#e88471', 'font-weight': 'bold'});
+          }
+
+        // === Destaca célula de Quirópteros com preenchimento ===
+var especieCell = $('td', row).eq(2);
+if (data[2] == 'Quiróptera') {
+  especieCell.css({
+    'background-color': '#e88471',
+    'font-weight': 'bold'
+  });
+}
+        }
+      "),
+        language = list(url = '//cdn.datatables.net/plug-ins/1.13.4/i18n/pt-BR.json')
+      ),
+      rownames = FALSE)
+  }, server = TRUE)
+}
+
+# ------------------------ RUN APP --------------------------------
+shinyApp(ui, server)
